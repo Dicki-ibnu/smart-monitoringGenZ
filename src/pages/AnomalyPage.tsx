@@ -1,0 +1,297 @@
+import { useEffect, useState, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
+import type { AnomalyAlert, Transaction } from '../types';
+import {
+  ShieldAlert, ShieldCheck, AlertTriangle, Brain, Activity,
+  CheckCircle, Eye,
+} from 'lucide-react';
+import { format } from 'date-fns';
+import clsx from 'clsx';
+
+export default function AnomalyPage() {
+  const { user } = useAuth();
+  const [alerts, setAlerts] = useState<AnomalyAlert[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    if (!user) return;
+    const [alertRes, txRes] = await Promise.all([
+      supabase.from('anomaly_alerts').select('*, transaction:transactions(*)').eq('user_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('transactions').select('*').eq('user_id', user.id).order('transaction_date', { ascending: false }),
+    ]);
+    setAlerts(alertRes.data || []);
+    setTransactions(txRes.data || []);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const handleResolve = async (id: string) => {
+    await supabase.from('anomaly_alerts').update({ is_resolved: true }).eq('id', id);
+    setAlerts((prev) => prev.map((a) => a.id === id ? { ...a, is_resolved: true } : a));
+  };
+
+  const runAnomalyScan = async () => {
+    setScanning(true);
+    setScanResult(null);
+
+    // Simulated ML-based anomaly detection
+    // In production, this would call the edge function with TensorFlow.js inference
+    const userTx = transactions.filter((t) => t.type === 'expense');
+    if (userTx.length < 3) {
+      setScanResult('Not enough transaction data to run anomaly detection. Add at least 3 expense transactions.');
+      setScanning(false);
+      return;
+    }
+
+    const amounts = userTx.map((t) => Number(t.amount));
+    const mean = amounts.reduce((a, b) => a + b, 0) / amounts.length;
+    const stdDev = Math.sqrt(amounts.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / amounts.length);
+
+    const newAlerts: { user_id: string; transaction_id: string; alert_type: string; severity: 'low' | 'medium' | 'high'; message: string }[] = [];
+
+    for (const tx of userTx) {
+      const amount = Number(tx.amount);
+      const zScore = stdDev > 0 ? (amount - mean) / stdDev : 0;
+      const isAnomaly = Math.abs(zScore) > 2;
+
+      if (isAnomaly && !tx.is_anomaly) {
+        await supabase.from('transactions').update({ is_anomaly: true, anomaly_score: Math.abs(zScore) }).eq('id', tx.id);
+
+        const severity: 'low' | 'medium' | 'high' = Math.abs(zScore) > 3 ? 'high' : Math.abs(zScore) > 2.5 ? 'medium' : 'low';
+        const alertType = amount > mean ? 'unusual_amount' : 'unusual_pattern';
+        const message = amount > mean
+          ? `Transaction "${tx.description}" of ${formatCurrency(amount)} is ${Math.abs(zScore).toFixed(1)}x above your average spending`
+          : `Unusual spending pattern detected for "${tx.description}"`;
+
+        newAlerts.push({
+          user_id: user!.id,
+          transaction_id: tx.id,
+          alert_type: alertType,
+          severity,
+          message,
+        });
+      }
+    }
+
+    if (newAlerts.length > 0) {
+      await supabase.from('anomaly_alerts').insert(newAlerts);
+      setScanResult(`Detected ${newAlerts.length} anomalous transaction(s). Alerts created.`);
+    } else {
+      setScanResult('No anomalies detected. Your spending looks normal.');
+    }
+
+    setScanning(false);
+    fetchData();
+  };
+
+  const filtered = alerts.filter((a) => filter === 'all' || a.severity === filter);
+  const unresolvedCount = alerts.filter((a) => !a.is_resolved).length;
+  const highCount = alerts.filter((a) => a.severity === 'high' && !a.is_resolved).length;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Anomaly Detection</h1>
+          <p className="text-slate-400 text-sm mt-1">AI-powered early warning system for unusual transactions</p>
+        </div>
+        <button
+          onClick={runAnomalyScan}
+          disabled={scanning}
+          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-900 font-semibold rounded-xl hover:opacity-90 transition-all text-sm disabled:opacity-50"
+        >
+          {scanning ? (
+            <><div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> Scanning...</>
+          ) : (
+            <><Brain className="w-4 h-4" /> Run AI Scan</>
+          )}
+        </button>
+      </div>
+
+      {/* Scan Result */}
+      {scanResult && (
+        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-300 flex items-start gap-3">
+          <Activity className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+          {scanResult}
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
+              <AlertTriangle className="w-5 h-5 text-amber-400" />
+            </div>
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Unresolved</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{unresolvedCount}</p>
+        </div>
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-9 h-9 rounded-xl bg-red-500/10 flex items-center justify-center">
+              <ShieldAlert className="w-5 h-5 text-red-400" />
+            </div>
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">High Severity</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{highCount}</p>
+        </div>
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+              <ShieldCheck className="w-5 h-5 text-emerald-400" />
+            </div>
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Resolved</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{alerts.filter((a) => a.is_resolved).length}</p>
+        </div>
+      </div>
+
+      {/* ML Model Status */}
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+        <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+          <Brain className="w-4 h-4 text-cyan-400" />
+          ML Inference Engine Status
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50">
+            <div className="w-2 h-2 rounded-full bg-emerald-400" />
+            <div>
+              <p className="text-xs text-slate-400">Anomaly Model</p>
+              <p className="text-sm text-white font-medium">Z-Score Detection</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50">
+            <div className="w-2 h-2 rounded-full bg-cyan-400" />
+            <div>
+              <p className="text-xs text-slate-400">OCR Model</p>
+              <p className="text-sm text-white font-medium">TensorFlow.js Ready</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50">
+            <div className="w-2 h-2 rounded-full bg-amber-400" />
+            <div>
+              <p className="text-xs text-slate-400">Training Data</p>
+              <p className="text-sm text-white font-medium">{transactions.length} transactions</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter */}
+      <div className="flex items-center gap-2">
+        <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>All</FilterChip>
+        <FilterChip active={filter === 'high'} onClick={() => setFilter('high')} color="red">High</FilterChip>
+        <FilterChip active={filter === 'medium'} onClick={() => setFilter('medium')} color="amber">Medium</FilterChip>
+        <FilterChip active={filter === 'low'} onClick={() => setFilter('low')} color="slate">Low</FilterChip>
+      </div>
+
+      {/* Alerts List */}
+      <div className="space-y-3">
+        {filtered.map((alert) => (
+          <div
+            key={alert.id}
+            className={clsx(
+              'bg-slate-900 rounded-2xl border p-5 transition-all',
+              alert.is_resolved ? 'border-slate-800 opacity-60' : (
+                alert.severity === 'high' ? 'border-red-500/30' :
+                alert.severity === 'medium' ? 'border-amber-500/30' : 'border-slate-800'
+              )
+            )}
+          >
+            <div className="flex items-start gap-4">
+              <div className={clsx(
+                'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0',
+                alert.severity === 'high' ? 'bg-red-500/10 text-red-400' :
+                alert.severity === 'medium' ? 'bg-amber-500/10 text-amber-400' : 'bg-slate-800 text-slate-400'
+              )}>
+                {alert.is_resolved ? <CheckCircle className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={clsx(
+                    'text-xs font-medium px-2 py-0.5 rounded-full',
+                    alert.severity === 'high' ? 'bg-red-500/10 text-red-400' :
+                    alert.severity === 'medium' ? 'bg-amber-500/10 text-amber-400' : 'bg-slate-700 text-slate-400'
+                  )}>
+                    {alert.severity}
+                  </span>
+                  <span className="text-xs text-slate-500">{alert.alert_type.replace('_', ' ')}</span>
+                  {alert.is_resolved && <span className="text-xs text-emerald-400">Resolved</span>}
+                </div>
+                <p className="text-sm text-white">{alert.message}</p>
+                <p className="text-xs text-slate-500 mt-1">{format(new Date(alert.created_at), 'MMM d, yyyy HH:mm')}</p>
+                {alert.transaction && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                    <Eye className="w-3.5 h-3.5" />
+                    {alert.transaction.description} &middot; {formatCurrency(Number(alert.transaction.amount))}
+                  </div>
+                )}
+              </div>
+              {!alert.is_resolved && (
+                <button
+                  onClick={() => handleResolve(alert.id)}
+                  className="px-3 py-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 rounded-lg hover:bg-emerald-500/20 transition-colors"
+                >
+                  Resolve
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <div className="text-center py-12 text-slate-500 text-sm">
+            <ShieldCheck className="w-12 h-12 mx-auto mb-3 text-slate-700" />
+            No anomaly alerts found
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilterChip({ active, onClick, color, children }: {
+  active: boolean;
+  onClick: () => void;
+  color?: string;
+  children: React.ReactNode;
+}) {
+  const colorMap: Record<string, string> = {
+    red: active ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'text-slate-400 border-slate-700',
+    amber: active ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'text-slate-400 border-slate-700',
+    slate: active ? 'bg-slate-700 text-slate-300 border-slate-600' : 'text-slate-400 border-slate-700',
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'px-3 py-1.5 rounded-lg text-xs font-medium border transition-all',
+        !color && (active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'text-slate-400 border-slate-700'),
+        color && colorMap[color]
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
+}

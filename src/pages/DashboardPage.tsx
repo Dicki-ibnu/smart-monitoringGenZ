@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { transactionsApi, categoriesApi, anomalyAlertsApi } from '../lib/api';
 import type { Transaction, Category, AnomalyAlert } from '../types';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, BarChart, Bar,
 } from 'recharts';
 import {
-  TrendingDown, TrendingUp, ShieldAlert, Wallet, ArrowUpRight, ArrowDownRight,
+  TrendingDown, TrendingUp, ShieldAlert, Wallet, ArrowUpRight,
   CreditCard, Smartphone, Banknote,
 } from 'lucide-react';
-import { format, subDays, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { format, startOfMonth, endOfMonth, isWithinInterval, subDays } from 'date-fns';
 
 const SOURCE_ICONS: Record<string, React.ReactNode> = {
   'e-wallet': <Smartphone className="w-4 h-4" />,
@@ -32,17 +32,23 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!user) return;
-    const fetchData = async () => {
-      const [txRes, catRes, alertRes] = await Promise.all([
-        supabase.from('transactions').select('*, category:categories(*)').eq('user_id', user.id).order('transaction_date', { ascending: false }).limit(100),
-        supabase.from('categories').select('*').eq('user_id', user.id),
-        supabase.from('anomaly_alerts').select('*, transaction:transactions(*)').eq('user_id', user.id).eq('is_resolved', false).order('created_at', { ascending: false }).limit(5),
-      ]);
-      setTransactions(txRes.data || []);
-      setCategories(catRes.data || []);
-      setAlerts(alertRes.data || []);
-      setLoading(false);
-    };
+    const userId = user.id;
+    async function fetchData() {
+      try {
+        const [txRes, catRes, alertRes] = await Promise.all([
+          transactionsApi.list(userId),
+          categoriesApi.list(userId),
+          anomalyAlertsApi.list(userId),
+        ]);
+        setTransactions(txRes.data || []);
+        setCategories(catRes.data || []);
+        setAlerts(alertRes.data || []);
+      } catch (err) {
+        console.error('Failed to fetch dashboard data:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
     fetchData();
   }, [user]);
 
@@ -57,7 +63,6 @@ export default function DashboardPage() {
   const totalIncome = monthTransactions.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
   const anomalyCount = monthTransactions.filter((t) => t.is_anomaly).length;
 
-  // Daily spending for area chart (last 30 days)
   const dailyData = Array.from({ length: 30 }, (_, i) => {
     const date = subDays(now, 29 - i);
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -68,7 +73,6 @@ export default function DashboardPage() {
     };
   });
 
-  // Category breakdown for pie chart
   const categoryData = categories
     .filter((c) => c.type === 'expense')
     .map((cat) => {
@@ -79,7 +83,6 @@ export default function DashboardPage() {
     })
     .filter((c) => c.value > 0);
 
-  // Source breakdown for bar chart
   const sourceData = ['e-wallet', 'mobile-banking', 'cash', 'debit-card', 'credit-card', 'transfer'].map((source) => ({
     source: source.replace('-', ' '),
     amount: monthTransactions
@@ -104,33 +107,10 @@ export default function DashboardPage() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Total Expenses"
-          value={totalExpense}
-          icon={<TrendingDown className="w-5 h-5" />}
-          color="red"
-          trend={monthTransactions.filter((t) => t.type === 'expense').length > 0}
-        />
-        <StatCard
-          title="Total Income"
-          value={totalIncome}
-          icon={<TrendingUp className="w-5 h-5" />}
-          color="emerald"
-          trend={totalIncome > 0}
-        />
-        <StatCard
-          title="Anomalies"
-          value={anomalyCount}
-          icon={<ShieldAlert className="w-5 h-5" />}
-          color="amber"
-          isCount
-        />
-        <StatCard
-          title="Net Balance"
-          value={totalIncome - totalExpense}
-          icon={<Wallet className="w-5 h-5" />}
-          color="cyan"
-        />
+        <StatCard title="Total Expenses" value={totalExpense} icon={<TrendingDown className="w-5 h-5" />} color="red" />
+        <StatCard title="Total Income" value={totalIncome} icon={<TrendingUp className="w-5 h-5" />} color="emerald" />
+        <StatCard title="Anomalies" value={anomalyCount} icon={<ShieldAlert className="w-5 h-5" />} color="amber" isCount />
+        <StatCard title="Net Balance" value={totalIncome - totalExpense} icon={<Wallet className="w-5 h-5" />} color="cyan" />
       </div>
 
       {/* Charts Row */}
@@ -165,15 +145,7 @@ export default function DashboardPage() {
           {categoryData.length > 0 ? (
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie
-                  data={categoryData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={55}
-                  outerRadius={85}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
+                <Pie data={categoryData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
                   {categoryData.map((entry, index) => (
                     <Cell key={index} fill={entry.color || CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
@@ -252,14 +224,14 @@ export default function DashboardPage() {
       </div>
 
       {/* Active Alerts */}
-      {alerts.length > 0 && (
+      {alerts.filter((a) => !a.is_resolved).length > 0 && (
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
           <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-amber-400" />
             Active Anomaly Alerts
           </h3>
           <div className="space-y-2">
-            {alerts.map((alert) => (
+            {alerts.filter((a) => !a.is_resolved).slice(0, 5).map((alert) => (
               <div key={alert.id} className={`flex items-center gap-3 p-3 rounded-xl border ${
                 alert.severity === 'high' ? 'bg-red-500/5 border-red-500/20' :
                 alert.severity === 'medium' ? 'bg-amber-500/5 border-amber-500/20' :
@@ -289,49 +261,38 @@ export default function DashboardPage() {
   );
 }
 
-function StatCard({ title, value, icon, color, trend, isCount }: {
+function StatCard({ title, value, icon, color, isCount }: {
   title: string;
   value: number;
   icon: React.ReactNode;
   color: 'red' | 'emerald' | 'amber' | 'cyan';
-  trend?: boolean;
   isCount?: boolean;
 }) {
   const colorMap = {
-    red: 'from-red-500/10 to-red-500/5 border-red-500/20 text-red-400',
-    emerald: 'from-emerald-500/10 to-emerald-500/5 border-emerald-500/20 text-emerald-400',
-    amber: 'from-amber-500/10 to-amber-500/5 border-amber-500/20 text-amber-400',
-    cyan: 'from-cyan-500/10 to-cyan-500/5 border-cyan-500/20 text-cyan-400',
+    red: 'from-red-500/10 to-red-500/5 border-red-500/20',
+    emerald: 'from-emerald-500/10 to-emerald-500/5 border-emerald-500/20',
+    amber: 'from-amber-500/10 to-amber-500/5 border-amber-500/20',
+    cyan: 'from-cyan-500/10 to-cyan-500/5 border-cyan-500/20',
   };
-
   const iconBgMap = {
     red: 'bg-red-500/10 text-red-400',
     emerald: 'bg-emerald-500/10 text-emerald-400',
     amber: 'bg-amber-500/10 text-amber-400',
     cyan: 'bg-cyan-500/10 text-cyan-400',
   };
+  const textMap = { red: 'text-red-400', emerald: 'text-emerald-400', amber: 'text-amber-400', cyan: 'text-cyan-400' };
 
   return (
-    <div className={`bg-gradient-to-br ${colorMap[color]} border rounded-2xl p-5`}>
+    <div className={`bg-gradient-to-br ${colorMap[color]} border rounded-2xl p-5 transition-transform hover:scale-[1.02]`}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{title}</span>
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${iconBgMap[color]}`}>
           {icon}
         </div>
       </div>
-      <p className="text-2xl font-bold text-white">
+      <p className={`text-2xl font-bold ${textMap[color]}`}>
         {isCount ? value : formatCurrency(value)}
       </p>
-      {trend !== undefined && (
-        <div className="flex items-center gap-1 mt-2">
-          {trend ? (
-            <ArrowDownRight className="w-3.5 h-3.5 text-red-400" />
-          ) : (
-            <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" />
-          )}
-          <span className="text-xs text-slate-400">This month</span>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { anomalyAlertsApi, anomalyUpdateApi, transactionsApi, edgeFunctionsApi } from '../lib/api';
 import type { AnomalyAlert, Transaction } from '../types';
 import {
   ShieldAlert, ShieldCheck, AlertTriangle, Brain, Activity,
-  CheckCircle, Eye,
+  CheckCircle, Eye, Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import clsx from 'clsx';
@@ -20,13 +20,18 @@ export default function AnomalyPage() {
 
   const fetchData = useCallback(async () => {
     if (!user) return;
-    const [alertRes, txRes] = await Promise.all([
-      supabase.from('anomaly_alerts').select('*, transaction:transactions(*)').eq('user_id', user.id).order('created_at', { ascending: false }),
-      supabase.from('transactions').select('*').eq('user_id', user.id).order('transaction_date', { ascending: false }),
-    ]);
-    setAlerts(alertRes.data || []);
-    setTransactions(txRes.data || []);
-    setLoading(false);
+    try {
+      const [alertRes, txRes] = await Promise.all([
+        anomalyAlertsApi.list(user.id),
+        transactionsApi.list(user.id),
+      ]);
+      setAlerts(alertRes.data || []);
+      setTransactions(txRes.data || []);
+    } catch (err) {
+      console.error('Failed to fetch anomaly data:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -34,16 +39,19 @@ export default function AnomalyPage() {
   }, [fetchData]);
 
   const handleResolve = async (id: string) => {
-    await supabase.from('anomaly_alerts').update({ is_resolved: true }).eq('id', id);
-    setAlerts((prev) => prev.map((a) => a.id === id ? { ...a, is_resolved: true } : a));
+    try {
+      await anomalyAlertsApi.resolve(id);
+      setAlerts((prev) => prev.map((a) => a.id === id ? { ...a, is_resolved: true } : a));
+    } catch (err) {
+      console.error('Failed to resolve alert:', err);
+    }
   };
 
   const runAnomalyScan = async () => {
+    if (!user) return;
     setScanning(true);
     setScanResult(null);
 
-    // Simulated ML-based anomaly detection
-    // In production, this would call the edge function with TensorFlow.js inference
     const userTx = transactions.filter((t) => t.type === 'expense');
     if (userTx.length < 3) {
       setScanResult('Not enough transaction data to run anomaly detection. Add at least 3 expense transactions.');
@@ -51,41 +59,32 @@ export default function AnomalyPage() {
       return;
     }
 
-    const amounts = userTx.map((t) => Number(t.amount));
-    const mean = amounts.reduce((a, b) => a + b, 0) / amounts.length;
-    const stdDev = Math.sqrt(amounts.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / amounts.length);
+    try {
+      // Call the edge function for ML-based anomaly detection
+      const { data } = await edgeFunctionsApi.anomalyDetect(userTx);
+      const anomalies = data?.anomalies || [];
 
-    const newAlerts: { user_id: string; transaction_id: string; alert_type: string; severity: 'low' | 'medium' | 'high'; message: string }[] = [];
+      if (anomalies.length > 0) {
+        // Flag anomalous transactions via REST API
+        for (const anomaly of anomalies) {
+          await anomalyUpdateApi.flagAnomaly(anomaly.transaction_id, anomaly.z_score);
 
-    for (const tx of userTx) {
-      const amount = Number(tx.amount);
-      const zScore = stdDev > 0 ? (amount - mean) / stdDev : 0;
-      const isAnomaly = Math.abs(zScore) > 2;
-
-      if (isAnomaly && !tx.is_anomaly) {
-        await supabase.from('transactions').update({ is_anomaly: true, anomaly_score: Math.abs(zScore) }).eq('id', tx.id);
-
-        const severity: 'low' | 'medium' | 'high' = Math.abs(zScore) > 3 ? 'high' : Math.abs(zScore) > 2.5 ? 'medium' : 'low';
-        const alertType = amount > mean ? 'unusual_amount' : 'unusual_pattern';
-        const message = amount > mean
-          ? `Transaction "${tx.description}" of ${formatCurrency(amount)} is ${Math.abs(zScore).toFixed(1)}x above your average spending`
-          : `Unusual spending pattern detected for "${tx.description}"`;
-
-        newAlerts.push({
-          user_id: user!.id,
-          transaction_id: tx.id,
-          alert_type: alertType,
-          severity,
-          message,
-        });
+          // Create alert
+          await anomalyAlertsApi.create({
+            user_id: user.id,
+            transaction_id: anomaly.transaction_id,
+            alert_type: anomaly.alert_type,
+            severity: anomaly.severity,
+            message: anomaly.message,
+          });
+        }
+        setScanResult(`Detected ${anomalies.length} anomalous transaction(s). Alerts created. Model: ${data.model}`);
+      } else {
+        setScanResult(data?.stats ? `No anomalies detected. Your spending looks normal. (Analyzed ${data.stats.total} transactions)` : 'No anomalies detected.');
       }
-    }
-
-    if (newAlerts.length > 0) {
-      await supabase.from('anomaly_alerts').insert(newAlerts);
-      setScanResult(`Detected ${newAlerts.length} anomalous transaction(s). Alerts created.`);
-    } else {
-      setScanResult('No anomalies detected. Your spending looks normal.');
+    } catch (err) {
+      console.error('Anomaly scan failed:', err);
+      setScanResult('Scan failed. Please try again.');
     }
 
     setScanning(false);
@@ -117,7 +116,7 @@ export default function AnomalyPage() {
           className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-900 font-semibold rounded-xl hover:opacity-90 transition-all text-sm disabled:opacity-50"
         >
           {scanning ? (
-            <><div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> Scanning...</>
+            <><Loader2 className="w-4 h-4 animate-spin" /> Scanning...</>
           ) : (
             <><Brain className="w-4 h-4" /> Run AI Scan</>
           )}
@@ -134,32 +133,32 @@ export default function AnomalyPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 transition-transform hover:scale-[1.02]">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
               <AlertTriangle className="w-5 h-5 text-amber-400" />
             </div>
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Unresolved</span>
           </div>
-          <p className="text-2xl font-bold text-white">{unresolvedCount}</p>
+          <p className="text-2xl font-bold text-amber-400">{unresolvedCount}</p>
         </div>
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 transition-transform hover:scale-[1.02]">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-9 h-9 rounded-xl bg-red-500/10 flex items-center justify-center">
               <ShieldAlert className="w-5 h-5 text-red-400" />
             </div>
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">High Severity</span>
           </div>
-          <p className="text-2xl font-bold text-white">{highCount}</p>
+          <p className="text-2xl font-bold text-red-400">{highCount}</p>
         </div>
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 transition-transform hover:scale-[1.02]">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
               <ShieldCheck className="w-5 h-5 text-emerald-400" />
             </div>
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Resolved</span>
           </div>
-          <p className="text-2xl font-bold text-white">{alerts.filter((a) => a.is_resolved).length}</p>
+          <p className="text-2xl font-bold text-emerald-400">{alerts.filter((a) => a.is_resolved).length}</p>
         </div>
       </div>
 
@@ -171,14 +170,14 @@ export default function AnomalyPage() {
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50">
-            <div className="w-2 h-2 rounded-full bg-emerald-400" />
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <div>
               <p className="text-xs text-slate-400">Anomaly Model</p>
               <p className="text-sm text-white font-medium">Z-Score Detection</p>
             </div>
           </div>
           <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50">
-            <div className="w-2 h-2 rounded-full bg-cyan-400" />
+            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
             <div>
               <p className="text-xs text-slate-400">OCR Model</p>
               <p className="text-sm text-white font-medium">TensorFlow.js Ready</p>
@@ -208,7 +207,7 @@ export default function AnomalyPage() {
           <div
             key={alert.id}
             className={clsx(
-              'bg-slate-900 rounded-2xl border p-5 transition-all',
+              'bg-slate-900 rounded-2xl border p-5 transition-all hover:translate-x-1',
               alert.is_resolved ? 'border-slate-800 opacity-60' : (
                 alert.severity === 'high' ? 'border-red-500/30' :
                 alert.severity === 'medium' ? 'border-amber-500/30' : 'border-slate-800'
@@ -224,7 +223,7 @@ export default function AnomalyPage() {
                 {alert.is_resolved ? <CheckCircle className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className={clsx(
                     'text-xs font-medium px-2 py-0.5 rounded-full',
                     alert.severity === 'high' ? 'bg-red-500/10 text-red-400' :
@@ -247,7 +246,7 @@ export default function AnomalyPage() {
               {!alert.is_resolved && (
                 <button
                   onClick={() => handleResolve(alert.id)}
-                  className="px-3 py-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 rounded-lg hover:bg-emerald-500/20 transition-colors"
+                  className="px-3 py-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 rounded-lg hover:bg-emerald-500/20 transition-colors flex-shrink-0"
                 >
                   Resolve
                 </button>

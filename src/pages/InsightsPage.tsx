@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { transactionsApi, categoriesApi, insightsApi, profilesApi } from '../lib/api';
 import type { Transaction, Category, Insight } from '../types';
 import {
   Lightbulb, TrendingDown, TrendingUp, AlertTriangle, Info,
@@ -22,15 +22,20 @@ export default function InsightsPage() {
 
   const fetchData = useCallback(async () => {
     if (!user) return;
-    const [txRes, catRes, insRes] = await Promise.all([
-      supabase.from('transactions').select('*, category:categories(*)').eq('user_id', user.id).order('transaction_date', { ascending: false }),
-      supabase.from('categories').select('*').eq('user_id', user.id),
-      supabase.from('insights').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-    ]);
-    setTransactions(txRes.data || []);
-    setCategories(catRes.data || []);
-    setInsights(insRes.data || []);
-    setLoading(false);
+    try {
+      const [txRes, catRes, insRes] = await Promise.all([
+        transactionsApi.list(user.id),
+        categoriesApi.list(user.id),
+        insightsApi.list(user.id),
+      ]);
+      setTransactions(txRes.data || []);
+      setCategories(catRes.data || []);
+      setInsights(insRes.data || []);
+    } catch (err) {
+      console.error('Failed to fetch insights data:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -47,7 +52,6 @@ export default function InsightsPage() {
   const totalExpense = monthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
   const totalIncome = monthTx.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
 
-  // Spending by category for radar chart
   const radarData = categories
     .filter((c) => c.type === 'expense')
     .map((cat) => {
@@ -58,7 +62,6 @@ export default function InsightsPage() {
     })
     .filter((d) => d.amount > 0);
 
-  // Weekly trend
   const weeklyData = Array.from({ length: 7 }, (_, i) => {
     const date = subDays(now, 6 - i);
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -76,7 +79,6 @@ export default function InsightsPage() {
 
     const newInsights: { user_id: string; insight_type: string; title: string; message: string; severity: 'info' | 'warning' | 'critical' }[] = [];
 
-    // Analyze spending patterns
     const expenseByCategory = categories
       .filter((c) => c.type === 'expense')
       .map((cat) => ({
@@ -107,39 +109,41 @@ export default function InsightsPage() {
       }
     }
 
-    // Budget analysis
-    const { data: profile } = await supabase.from('profiles').select('monthly_budget').eq('id', user.id).maybeSingle();
-    const budget = profile?.monthly_budget || 0;
-    if (budget > 0) {
-      const budgetUsed = Math.round((totalExpense / Number(budget)) * 100);
-      if (budgetUsed > 90) {
-        newInsights.push({
-          user_id: user.id,
-          insight_type: 'budget_alert',
-          title: 'Budget Nearly Exceeded',
-          message: `You've used ${budgetUsed}% of your monthly budget. Consider reducing non-essential spending for the rest of the month.`,
-          severity: 'critical',
-        });
-      } else if (budgetUsed > 70) {
-        newInsights.push({
-          user_id: user.id,
-          insight_type: 'budget_alert',
-          title: 'Budget Warning',
-          message: `You've used ${budgetUsed}% of your monthly budget. You have ${formatCurrency(Number(budget) - totalExpense)} remaining.`,
-          severity: 'warning',
-        });
-      } else {
-        newInsights.push({
-          user_id: user.id,
-          insight_type: 'budget_alert',
-          title: 'On Track',
-          message: `You've used ${budgetUsed}% of your monthly budget. Great job managing your spending!`,
-          severity: 'info',
-        });
+    try {
+      const profile = await profilesApi.get(user.id);
+      const budget = Number(profile?.monthly_budget || 0);
+      if (budget > 0) {
+        const budgetUsed = Math.round((totalExpense / budget) * 100);
+        if (budgetUsed > 90) {
+          newInsights.push({
+            user_id: user.id,
+            insight_type: 'budget_alert',
+            title: 'Budget Nearly Exceeded',
+            message: `You've used ${budgetUsed}% of your monthly budget. Consider reducing non-essential spending for the rest of the month.`,
+            severity: 'critical',
+          });
+        } else if (budgetUsed > 70) {
+          newInsights.push({
+            user_id: user.id,
+            insight_type: 'budget_alert',
+            title: 'Budget Warning',
+            message: `You've used ${budgetUsed}% of your monthly budget. You have ${formatCurrency(budget - totalExpense)} remaining.`,
+            severity: 'warning',
+          });
+        } else {
+          newInsights.push({
+            user_id: user.id,
+            insight_type: 'budget_alert',
+            title: 'On Track',
+            message: `You've used ${budgetUsed}% of your monthly budget. Great job managing your spending!`,
+            severity: 'info',
+          });
+        }
       }
+    } catch (err) {
+      console.error('Failed to fetch profile:', err);
     }
 
-    // Savings rate
     if (totalIncome > 0) {
       const savingsRate = Math.round(((totalIncome - totalExpense) / totalIncome) * 100);
       if (savingsRate < 10) {
@@ -161,7 +165,6 @@ export default function InsightsPage() {
       }
     }
 
-    // E-wallet usage pattern
     const eWalletExpense = monthTx.filter((t) => t.source === 'e-wallet' && t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
     const eWalletPct = totalExpense > 0 ? Math.round((eWalletExpense / totalExpense) * 100) : 0;
     if (eWalletPct > 60) {
@@ -174,7 +177,6 @@ export default function InsightsPage() {
       });
     }
 
-    // Anomaly summary
     const anomalyCount = monthTx.filter((t) => t.is_anomaly).length;
     if (anomalyCount > 0) {
       newInsights.push({
@@ -187,7 +189,11 @@ export default function InsightsPage() {
     }
 
     if (newInsights.length > 0) {
-      await supabase.from('insights').insert(newInsights);
+      try {
+        await insightsApi.create(newInsights);
+      } catch (err) {
+        console.error('Failed to save insights:', err);
+      }
     }
 
     setGenerating(false);
@@ -195,8 +201,12 @@ export default function InsightsPage() {
   };
 
   const markAsRead = async (id: string) => {
-    await supabase.from('insights').update({ is_read: true }).eq('id', id);
-    setInsights((prev) => prev.map((i) => i.id === id ? { ...i, is_read: true } : i));
+    try {
+      await insightsApi.markRead(id);
+      setInsights((prev) => prev.map((i) => i.id === id ? { ...i, is_read: true } : i));
+    } catch (err) {
+      console.error('Failed to mark insight as read:', err);
+    }
   };
 
   if (loading) {
@@ -229,32 +239,32 @@ export default function InsightsPage() {
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 transition-transform hover:scale-[1.02]">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-9 h-9 rounded-xl bg-red-500/10 flex items-center justify-center">
               <TrendingDown className="w-5 h-5 text-red-400" />
             </div>
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Monthly Expense</span>
           </div>
-          <p className="text-2xl font-bold text-white">{formatCurrency(totalExpense)}</p>
+          <p className="text-2xl font-bold text-red-400">{formatCurrency(totalExpense)}</p>
         </div>
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 transition-transform hover:scale-[1.02]">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
               <TrendingUp className="w-5 h-5 text-emerald-400" />
             </div>
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Monthly Income</span>
           </div>
-          <p className="text-2xl font-bold text-white">{formatCurrency(totalIncome)}</p>
+          <p className="text-2xl font-bold text-emerald-400">{formatCurrency(totalIncome)}</p>
         </div>
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 transition-transform hover:scale-[1.02]">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-9 h-9 rounded-xl bg-cyan-500/10 flex items-center justify-center">
               <PiggyBank className="w-5 h-5 text-cyan-400" />
             </div>
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Savings Rate</span>
           </div>
-          <p className="text-2xl font-bold text-white">
+          <p className="text-2xl font-bold text-cyan-400">
             {totalIncome > 0 ? Math.round(((totalIncome - totalExpense) / totalIncome) * 100) : 0}%
           </p>
         </div>
@@ -296,8 +306,8 @@ export default function InsightsPage() {
               <Tooltip
                 contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, fontSize: 13 }}
               />
-              <Line type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} />
-              <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
+              <Line type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: '#ef4444' }} />
+              <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: '#10b981' }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -344,7 +354,7 @@ export default function InsightsPage() {
           {insights.map((insight) => (
             <div
               key={insight.id}
-              className={`bg-slate-900 rounded-2xl border p-5 transition-all ${
+              className={`bg-slate-900 rounded-2xl border p-5 transition-all hover:translate-x-1 ${
                 insight.severity === 'critical' ? 'border-red-500/30' :
                 insight.severity === 'warning' ? 'border-amber-500/30' : 'border-slate-800'
               } ${insight.is_read ? 'opacity-60' : ''}`}
@@ -358,7 +368,7 @@ export default function InsightsPage() {
                    insight.severity === 'warning' ? <AlertTriangle className="w-5 h-5" /> : <Info className="w-5 h-5" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                       insight.severity === 'critical' ? 'bg-red-500/10 text-red-400' :
                       insight.severity === 'warning' ? 'bg-amber-500/10 text-amber-400' : 'bg-cyan-500/10 text-cyan-400'
@@ -373,7 +383,7 @@ export default function InsightsPage() {
                 {!insight.is_read && (
                   <button
                     onClick={() => markAsRead(insight.id)}
-                    className="text-xs text-slate-400 hover:text-white transition-colors"
+                    className="text-xs text-slate-400 hover:text-white transition-colors flex-shrink-0"
                   >
                     Dismiss
                   </button>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { transactionsApi, categoriesApi } from '../lib/api';
 import type { Transaction, Category, TransactionSource, TransactionType } from '../types';
 import { Plus, Search, Trash2, CreditCard as Edit3, X, Check, ArrowUpRight, ArrowDownRight, CreditCard, Smartphone, Banknote, ChevronDown } from 'lucide-react';
 import { format } from 'date-fns';
@@ -48,19 +48,24 @@ export default function TransactionsPage() {
 
   const fetchTransactions = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from('transactions')
-      .select('*, category:categories(*)')
-      .eq('user_id', user.id)
-      .order('transaction_date', { ascending: false });
-    setTransactions(data || []);
-    setLoading(false);
+    try {
+      const res = await transactionsApi.list(user.id);
+      setTransactions(res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch transactions:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   const fetchCategories = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase.from('categories').select('*').eq('user_id', user.id);
-    setCategories(data || []);
+    try {
+      const res = await categoriesApi.list(user.id);
+      setCategories(res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch categories:', err);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -76,8 +81,12 @@ export default function TransactionsPage() {
   });
 
   const handleDelete = async (id: string) => {
-    await supabase.from('transactions').delete().eq('id', id);
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    try {
+      await transactionsApi.delete(id);
+      setTransactions((prev) => prev.filter((t) => t.id !== id));
+    } catch (err) {
+      console.error('Failed to delete transaction:', err);
+    }
   };
 
   const handleEdit = (tx: Transaction) => {
@@ -162,7 +171,54 @@ export default function TransactionsPage() {
 
       {/* Transaction List */}
       <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile card view */}
+        <div className="block sm:hidden divide-y divide-slate-800/50">
+          {filtered.map((tx) => (
+            <div key={tx.id} className="p-4 hover:bg-slate-800/30 transition-colors">
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  tx.type === 'expense' ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
+                }`}>
+                  {tx.type === 'expense' ? <ArrowDownRight className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white truncate">{tx.description || 'Untitled'}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-slate-500 capitalize">{tx.source.replace('-', ' ')}</span>
+                    {tx.is_anomaly && (
+                      <span className="text-[10px] font-medium text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">Anomaly</span>
+                    )}
+                  </div>
+                </div>
+                <span className={`text-sm font-semibold ${tx.type === 'expense' ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {tx.type === 'expense' ? '-' : '+'}{formatCurrency(Number(tx.amount))}
+                </span>
+              </div>
+              <div className="flex items-center justify-between ml-11">
+                <div className="flex items-center gap-2">
+                  {tx.category && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: tx.category.color + '15', color: tx.category.color }}>
+                      <span className="w-1 h-1 rounded-full" style={{ background: tx.category.color }} />
+                      {tx.category.name}
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-500">{format(new Date(tx.transaction_date), 'MMM d')}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => handleEdit(tx)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleDelete(tx.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table view */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
@@ -278,10 +334,14 @@ function TransactionForm({ userId, categories, editingId, transactions, onClose,
       transaction_date: date,
     };
 
-    if (editingId) {
-      await supabase.from('transactions').update(payload).eq('id', editingId);
-    } else {
-      await supabase.from('transactions').insert(payload);
+    try {
+      if (editingId) {
+        await transactionsApi.update(editingId, payload);
+      } else {
+        await transactionsApi.create(payload);
+      }
+    } catch (err) {
+      console.error('Failed to save transaction:', err);
     }
 
     setSaving(false);
@@ -289,18 +349,17 @@ function TransactionForm({ userId, categories, editingId, transactions, onClose,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={onClose}>
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-bold text-white">{editingId ? 'Edit Transaction' : 'New Transaction'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Type Toggle */}
           <div className="flex bg-slate-800/50 rounded-xl p-1">
-            <button type="button" onClick={() => setType('expense')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium transition-all', type === 'expense' ? 'bg-red-500 text-white' : 'text-slate-400')}>Expense</button>
-            <button type="button" onClick={() => setType('income')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium transition-all', type === 'income' ? 'bg-emerald-500 text-white' : 'text-slate-400')}>Income</button>
+            <button type="button" onClick={() => setType('expense')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium transition-all', type === 'expense' ? 'bg-red-500 text-white' : 'text-slate-400 hover:text-white')}>Expense</button>
+            <button type="button" onClick={() => setType('income')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium transition-all', type === 'income' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-white')}>Income</button>
           </div>
 
           <div>
@@ -311,7 +370,7 @@ function TransactionForm({ userId, categories, editingId, transactions, onClose,
               min="0"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm"
+              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 text-sm transition-all"
               placeholder="0.00"
               required
             />
@@ -320,13 +379,13 @@ function TransactionForm({ userId, categories, editingId, transactions, onClose,
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1.5">
               Description
-              {autoCat && <span className="ml-2 text-emerald-400 text-xs">Auto-categorized!</span>}
+              {autoCat && <span className="ml-2 text-emerald-400 text-xs animate-pulse">Auto-categorized!</span>}
             </label>
             <input
               type="text"
               value={description}
               onChange={(e) => handleDescriptionChange(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm"
+              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 text-sm transition-all"
               placeholder="e.g. Grab food delivery"
               required
             />

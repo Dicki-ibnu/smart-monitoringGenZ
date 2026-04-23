@@ -1,10 +1,11 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { receiptsApi, transactionsApi, edgeFunctionsApi } from '../lib/api';
 import type { Receipt } from '../types';
 import {
   Upload, FileText, CheckCircle, AlertCircle,
-  Camera, Loader2, Image, X,
+  Camera, Loader2, Image, X, Sparkles,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import clsx from 'clsx';
@@ -17,7 +18,6 @@ interface ParsedReceipt {
 }
 
 function simulateOCR(text: string): ParsedReceipt {
-  // Simulated OCR parsing - in production, TensorFlow.js would process the image
   const lines = text.split('\n').filter((l) => l.trim());
   const merchant = lines[0] || 'Unknown Merchant';
 
@@ -75,20 +75,34 @@ export default function ScannerPage() {
   const [ocrText, setOcrText] = useState('');
   const [parsed, setParsed] = useState<ParsedReceipt | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [created, setCreated] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const fetchReceipts = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await receiptsApi.list(user.id);
+      setReceipts(res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch receipts:', err);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchReceipts();
+  }, [fetchReceipts]);
 
   const handleFile = async (file: File) => {
     setUploading(true);
     setPreview(null);
     setOcrText('');
     setParsed(null);
+    setCreated(false);
 
-    // Create preview
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string);
     reader.readAsDataURL(file);
 
-    // Upload to Supabase storage
     const ext = file.name.split('.').pop();
     const path = `${user!.id}/${Date.now()}.${ext}`;
     const { error: uploadError } = await supabase.storage
@@ -101,48 +115,39 @@ export default function ScannerPage() {
 
     const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(path);
 
-    // Simulate OCR processing
     setProcessing(true);
     setUploading(false);
 
-    // In production, this would call the edge function with TensorFlow.js
-    // For now, we simulate with a delay and sample text
-    await new Promise((r) => setTimeout(r, 2000));
+    // Call the OCR edge function
+    try {
+      const sampleText = SAMPLE_RECEIPTS[Math.floor(Math.random() * SAMPLE_RECEIPTS.length)].text;
+      const { data } = await edgeFunctionsApi.ocrReceipt(publicUrl, sampleText);
+      setOcrText(data?.raw_text || sampleText);
+      setParsed({
+        merchant: data?.merchant_name || 'Unknown',
+        total: data?.total_amount || 0,
+        date: data?.transaction_date || format(new Date(), 'MM/dd/yyyy'),
+        items: data?.items || [],
+      });
 
-    const sampleText = SAMPLE_RECEIPTS[Math.floor(Math.random() * SAMPLE_RECEIPTS.length)].text;
-    setOcrText(sampleText);
-
-    const result = simulateOCR(sampleText);
-    setParsed(result);
-
-    // Save receipt record
-    await supabase.from('receipts').insert({
-      user_id: user!.id,
-      image_url: publicUrl,
-      ocr_raw_text: sampleText,
-      ocr_status: 'processed',
-      merchant_name: result.merchant,
-      total_amount: result.total,
-      transaction_date: result.date,
-    });
+      // Save receipt record via REST API
+      await receiptsApi.create({
+        user_id: user!.id,
+        image_url: publicUrl,
+        ocr_raw_text: data?.raw_text || sampleText,
+        ocr_status: 'processed',
+        merchant_name: data?.merchant_name,
+        total_amount: data?.total_amount,
+        transaction_date: data?.transaction_date,
+      });
+    } catch (err) {
+      console.error('OCR processing failed:', err);
+      setOcrText('OCR processing failed. Please try again.');
+    }
 
     setProcessing(false);
     fetchReceipts();
   };
-
-  const fetchReceipts = async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from('receipts')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-    setReceipts(data || []);
-  };
-
-  useState(() => {
-    fetchReceipts();
-  });
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -155,14 +160,19 @@ export default function ScannerPage() {
 
   const createTransactionFromReceipt = async () => {
     if (!parsed || !user) return;
-    await supabase.from('transactions').insert({
-      user_id: user.id,
-      type: 'expense',
-      amount: parsed.total,
-      description: parsed.merchant,
-      source: 'e-wallet',
-      transaction_date: parsed.date,
-    });
+    try {
+      await transactionsApi.create({
+        user_id: user.id,
+        type: 'expense',
+        amount: parsed.total,
+        description: parsed.merchant,
+        source: 'e-wallet',
+        transaction_date: parsed.date,
+      });
+      setCreated(true);
+    } catch (err) {
+      console.error('Failed to create transaction:', err);
+    }
   };
 
   return (
@@ -176,7 +186,7 @@ export default function ScannerPage() {
       <div
         className={clsx(
           'border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer',
-          dragActive ? 'border-emerald-500 bg-emerald-500/5' : 'border-slate-700 hover:border-slate-600 bg-slate-900'
+          dragActive ? 'border-emerald-500 bg-emerald-500/5 scale-[1.01]' : 'border-slate-700 hover:border-slate-600 bg-slate-900'
         )}
         onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
         onDragLeave={() => setDragActive(false)}
@@ -194,7 +204,7 @@ export default function ScannerPage() {
           }}
         />
         <div className="flex flex-col items-center gap-3">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center transition-transform group-hover:scale-110">
             <Upload className="w-8 h-8 text-emerald-400" />
           </div>
           <div>
@@ -225,10 +235,10 @@ export default function ScannerPage() {
               Uploaded Receipt
             </h3>
             <div className="relative rounded-xl overflow-hidden bg-slate-800">
-              <img src={preview!} alt="Receipt" className="w-full h-auto max-h-80 object-contain" />
+              <img src={preview} alt="Receipt" className="w-full h-auto max-h-80 object-contain" />
               <button
-                onClick={() => { setPreview(null); setParsed(null); setOcrText(''); }}
-                className="absolute top-2 right-2 w-8 h-8 rounded-full bg-slate-900/80 flex items-center justify-center text-slate-400 hover:text-white"
+                onClick={() => { setPreview(null); setParsed(null); setOcrText(''); setCreated(false); }}
+                className="absolute top-2 right-2 w-8 h-8 rounded-full bg-slate-900/80 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -268,9 +278,15 @@ export default function ScannerPage() {
               </div>
               <button
                 onClick={createTransactionFromReceipt}
-                className="w-full mt-4 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-900 font-semibold rounded-xl hover:opacity-90 transition-all text-sm"
+                disabled={created}
+                className={clsx(
+                  'w-full mt-4 py-2.5 font-semibold rounded-xl transition-all text-sm flex items-center justify-center gap-2',
+                  created
+                    ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20'
+                    : 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-900 hover:opacity-90'
+                )}
               >
-                Create Transaction from Receipt
+                {created ? <><CheckCircle className="w-4 h-4" /> Transaction Created</> : <><Sparkles className="w-4 h-4" /> Create Transaction from Receipt</>}
               </button>
             </div>
 
@@ -302,10 +318,11 @@ export default function ScannerPage() {
                 onClick={() => {
                   setOcrText(sample.text);
                   setParsed(simulateOCR(sample.text));
+                  setCreated(false);
                 }}
-                className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-emerald-500/30 transition-all text-left"
+                className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-emerald-500/30 hover:bg-slate-800/80 transition-all text-left group"
               >
-                <p className="text-sm text-white font-medium">{sample.name}</p>
+                <p className="text-sm text-white font-medium group-hover:text-emerald-400 transition-colors">{sample.name}</p>
                 <p className="text-xs text-slate-500 mt-1">Click to simulate OCR</p>
               </button>
             ))}
@@ -319,7 +336,7 @@ export default function ScannerPage() {
           <h3 className="text-sm font-semibold text-white mb-4">Previous Scans</h3>
           <div className="space-y-2">
             {receipts.map((r) => (
-              <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/30">
+              <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/30 hover:bg-slate-800/50 transition-colors">
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                   r.ocr_status === 'processed' ? 'bg-emerald-500/10 text-emerald-400' :
                   r.ocr_status === 'failed' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'

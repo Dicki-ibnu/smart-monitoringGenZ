@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// Konfigurasi utama untuk CRUD Database ke Supabase
 const api = axios.create({
   baseURL: `${supabaseUrl}/rest/v1`,
   headers: {
@@ -85,37 +86,41 @@ export const insightsApi = {
 };
 
 // Profiles
+// Profiles
 export const profilesApi = {
   get: (userId: string) =>
-    api.get(`/profiles?id=eq.${userId}&select=monthly_budget`).then((r) => r.data?.[0] ?? null),
+    api.get(`/profiles?id=eq.${userId}`).then((r) => r.data?.[0] ?? null),
+
+  updateTheme: (userId: string, themeName: string) =>
+    api.patch(`/profiles?id=eq.${userId}`, { active_theme: themeName }),
+
+  // Memperbarui jumlah poin pengguna
+  updatePoints: (userId: string, newPoints: number) =>
+    api.patch(`/profiles?id=eq.${userId}`, { points: newPoints }),
+
+  // Membeli tema baru menggunakan poin
+  unlockTheme: (userId: string, themeName: string, newPoints: number, currentUnlocked: string[]) =>
+    api.patch(`/profiles?id=eq.${userId}`, { 
+      points: newPoints,
+      unlocked_themes: [...currentUnlocked, themeName] 
+    }),
+    
+  // Mengambil data untuk halaman Leaderboard (10 teratas)
+  getLeaderboard: () =>
+    api.get(`/profiles?select=id,full_name,points&order=points.desc&limit=10`),
 };
 
-// Edge Functions
-export const edgeFunctionsApi = {
+// URL Backend Express
+const expressBaseUrl = 'http://localhost:5000/api';
+
+// Panggilan khusus ke server Express untuk AI dan OCR
+export const customBackendApi = {
   anomalyDetect: (transactions: unknown[]) => {
-    return axios.post(
-      `${supabaseUrl}/functions/v1/anomaly-detect`,
-      { transactions },
-      {
-        headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    return axios.post(`${expressBaseUrl}/anomaly-detect`, { transactions });
   },
 
   ocrReceipt: (imageUrl: string, rawText: string) => {
-    return axios.post(
-      `${supabaseUrl}/functions/v1/ocr-receipt`,
-      { image_url: imageUrl, raw_text: rawText },
-      {
-        headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    return axios.post(`${expressBaseUrl}/ocr-receipt`, { image_url: imageUrl, raw_text: rawText });
   },
 };
 

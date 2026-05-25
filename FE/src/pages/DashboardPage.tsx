@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 import {
   TrendingDown, TrendingUp, ShieldAlert, Wallet, ArrowUpRight,
-  CreditCard, Smartphone, Banknote,
+  CreditCard, Smartphone, Banknote
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isWithinInterval, subDays } from 'date-fns';
 

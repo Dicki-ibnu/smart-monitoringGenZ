@@ -1,0 +1,22 @@
+# Dependensi Node.js
+node_modules/
+
+# File Rahasia / Environment Variables
+.env
+.env.*
+!.env.example
+
+# Folder Build (jika nanti backend-nya di-build)
+dist/
+build/
+
+# Log files
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# File Sistem OS
+.DS_Store
+Thumbs.db

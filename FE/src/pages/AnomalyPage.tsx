@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { anomalyAlertsApi, anomalyUpdateApi, transactionsApi, edgeFunctionsApi } from '../lib/api';
+// Ubah impor di sini menggunakan customBackendApi
+import { anomalyAlertsApi, anomalyUpdateApi, transactionsApi, customBackendApi } from '../lib/api';
 import type { AnomalyAlert, Transaction } from '../types';
 import {
   ShieldAlert, ShieldCheck, AlertTriangle, Brain, Activity,
@@ -60,16 +61,16 @@ export default function AnomalyPage() {
     }
 
     try {
-      // Call the edge function for ML-based anomaly detection
-      const { data } = await edgeFunctionsApi.anomalyDetect(userTx);
+      // Panggil endpoint deteksi anomali di server Express
+      const { data } = await customBackendApi.anomalyDetect(userTx);
       const anomalies = data?.anomalies || [];
 
       if (anomalies.length > 0) {
-        // Flag anomalous transactions via REST API
+        // Flag transaksi anomali via REST API
         for (const anomaly of anomalies) {
           await anomalyUpdateApi.flagAnomaly(anomaly.transaction_id, anomaly.z_score);
 
-          // Create alert
+          // Buat peringatan
           await anomalyAlertsApi.create({
             user_id: user.id,
             transaction_id: anomaly.transaction_id,

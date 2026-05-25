@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1e293b transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 3px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+  }
+}
+
+@layer utilities {
+  .animate-in {
+    animation: slideIn 0.2s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+/* ==========================================
+   SISTEM TEMA KARAKTER KHUSUS
+   ========================================== */
+
+/* 1. TEMA DEFAULT (Cyber Maskulin - FREE) */
+.theme-default {
+  @apply bg-slate-950 text-[#ffffff];
+}
+
+/* 2. TEMA HELLO KITTY (Cute Pink Pastel - FREE) */
+.theme-hellokitty {
+  @apply bg-[#FFF0F5] text-[#8B4513];
+}
+.theme-hellokitty .bg-slate-950 { @apply bg-[#FFF0F5]; }
+.theme-hellokitty .bg-slate-900 { @apply bg-white border-[#FFB6C1] shadow-md shadow-pink-100 text-[#FF69B4]; }
+.theme-hellokitty .bg-slate-800 { @apply bg-[#FFE4E1]; }
+.theme-hellokitty .border-slate-800 { @apply border-[#FFC0CB]; }
+.theme-hellokitty .border-slate-700 { @apply border-[#FFB6C1]; }
+.theme-hellokitty .text-slate-400 { @apply text-[#FF69B4]; }
+.theme-hellokitty .text-white { color: #8B4513; }
+.theme-hellokitty .bg-gradient-to-r { @apply from-[#FF69B4] to-[#FFB6C1] text-[#ffffff]; }
+
+/* 3. TEMA OCEAN (Gaya Sporty/eFootball - 100 Poin) */
+.theme-ocean {
+  @apply bg-[#0B132B] text-[#91A6FF];
+}
+.theme-ocean .bg-slate-950 { @apply bg-[#0B132B]; }
+.theme-ocean .bg-slate-900 { @apply bg-[#1C2541] border-[#3A506B] text-[#ffffff]; }
+.theme-ocean .bg-slate-800 { @apply bg-[#3A506B]/50; }
+.theme-ocean .border-slate-800 { @apply border-[#3A506B]; }
+.theme-ocean .border-slate-700 { @apply border-[#5BC0BE]; }
+.theme-ocean .text-slate-400 { @apply text-[#6FFFE9]; }
+.theme-ocean .bg-gradient-to-r { @apply from-[#48CAE4] to-[#0077B6] text-[#ffffff]; }
+
+/* 4. TEMA ANIME (Vaporwave Estetik - 200 Poin) */
+.theme-anime {
+  @apply bg-[#1a0033] text-[#ff007f];
+}
+.theme-anime .bg-slate-950 { @apply bg-[#1a0033]; }
+.theme-anime .bg-slate-900 { @apply bg-[#2d004d] border-[#ff00aa] shadow-[0_0_15px_rgba(255,0,170,0.2)] text-[#ffffff]; }
+.theme-anime .bg-slate-800 { @apply bg-[#4d0080]; }
+.theme-anime .border-slate-800 { @apply border-[#ff00aa]/40; }
+.theme-anime .border-slate-700 { @apply border-[#00ffff]; }
+.theme-anime .text-slate-400 { @apply text-[#00ffff] font-mono; }
+.theme-anime .text-white { color: white; }
+.theme-anime .bg-gradient-to-r { @apply from-[#ff00aa] to-[#00ffff] text-slate-950; }

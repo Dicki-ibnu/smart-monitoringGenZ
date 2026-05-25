@@ -3,16 +3,18 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
   LayoutDashboard, ArrowLeftRight, ShieldAlert, ScanLine,
-  Lightbulb, LogOut, Menu, X, Wallet, ChevronRight,
+  Lightbulb, LogOut, Menu, X, Wallet, ChevronRight, Trophy // Tambahkan Trophy di sini
 } from 'lucide-react';
 import clsx from 'clsx';
 
+// Menambahkan menu Rewards ke daftar navigasi
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/transactions', icon: ArrowLeftRight, label: 'Transactions' },
   { to: '/anomaly', icon: ShieldAlert, label: 'Anomaly Detection' },
   { to: '/scanner', icon: ScanLine, label: 'Receipt Scanner' },
   { to: '/insights', icon: Lightbulb, label: 'Insights' },
+  { to: '/rewards', icon: Trophy, label: 'Rewards & Theme' }, // Menu baru
 ];
 
 export default function Layout() {

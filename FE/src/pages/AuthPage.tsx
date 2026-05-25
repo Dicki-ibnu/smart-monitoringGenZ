@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuth'; // Sesuaikan path jika berbeda
 import { Wallet, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 export default function AuthPage() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInWithGoogle } = useAuth(); // Import signInWithGoogle
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,10 +24,22 @@ export default function AuthPage() {
     if (error) {
       setError(error);
     } else if (!isLogin) {
-      setSuccess('Account created! You can now sign in.');
+      setSuccess('Account created! Please check your email to verify or sign in.');
       setIsLogin(true);
     }
     setLoading(false);
+  };
+
+  const handleGoogleLogin = async () => {
+    setError('');
+    setLoading(true);
+    const { error } = await signInWithGoogle();
+    
+    if (error) {
+      setError(error);
+      setLoading(false);
+    }
+    // Jika sukses, Supabase akan otomatis melakukan redirect ke Google
   };
 
   return (
@@ -133,6 +145,32 @@ export default function AuthPage() {
               )}
             </button>
           </form>
+
+          {/* Pemisah "Or continue with" */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-700"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-slate-900 text-slate-400">Or continue with</span>
+            </div>
+          </div>
+
+          {/* Tombol Login Google */}
+          <button
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            type="button"
+            className="w-full py-3 bg-slate-800 border border-slate-700 text-white font-medium rounded-xl hover:bg-slate-700 transition-all focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 flex items-center justify-center gap-3"
+          >
+            <img 
+              src="https://www.svgrepo.com/show/475656/google-color.svg" 
+              alt="Google" 
+              className="w-5 h-5" 
+            />
+            Google
+          </button>
+
         </div>
 
         {/* Footer */}

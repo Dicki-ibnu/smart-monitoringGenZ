@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
-import { receiptsApi, transactionsApi, edgeFunctionsApi } from '../lib/api';
+// Ubah impor di sini menggunakan customBackendApi
+import { receiptsApi, transactionsApi, customBackendApi } from '../lib/api';
 import type { Receipt } from '../types';
 import {
   Upload, FileText, CheckCircle, AlertCircle,
@@ -118,10 +119,11 @@ export default function ScannerPage() {
     setProcessing(true);
     setUploading(false);
 
-    // Call the OCR edge function
+    // Memanggil endpoint OCR di server Express
     try {
       const sampleText = SAMPLE_RECEIPTS[Math.floor(Math.random() * SAMPLE_RECEIPTS.length)].text;
-      const { data } = await edgeFunctionsApi.ocrReceipt(publicUrl, sampleText);
+      const { data } = await customBackendApi.ocrReceipt(publicUrl, sampleText);
+      
       setOcrText(data?.raw_text || sampleText);
       setParsed({
         merchant: data?.merchant_name || 'Unknown',
@@ -130,7 +132,7 @@ export default function ScannerPage() {
         items: data?.items || [],
       });
 
-      // Save receipt record via REST API
+      // Menyimpan data struk ke database
       await receiptsApi.create({
         user_id: user!.id,
         image_url: publicUrl,

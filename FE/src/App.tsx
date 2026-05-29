@@ -9,6 +9,7 @@ import AnomalyPage from './pages/AnomalyPage';
 import ScannerPage from './pages/ScannerPage';
 import InsightsPage from './pages/InsightsPage';
 import GamificationPage from './pages/GamificationPage';
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   
@@ -62,8 +63,11 @@ function App() {
               <Route path="anomaly" element={<AnomalyPage />} />
               <Route path="scanner" element={<ScannerPage />} />
               <Route path="insights" element={<InsightsPage />} />
+              
+              {/* Rute Rewards sekarang sudah AMAN di dalam Layout */}
+              <Route path="rewards" element={<GamificationPage />} />
             </Route>
-            <Route path="rewards" element={<GamificationPage />} />
+
             {/* Lempar ke halaman utama jika user mengetik URL ngawur */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

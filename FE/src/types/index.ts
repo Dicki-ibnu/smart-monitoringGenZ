@@ -21,17 +21,16 @@ export interface Category {
 export interface Transaction {
   id: string;
   user_id: string;
-  category_id: string | null;
   amount: number;
   description: string;
+  category: string;       
+  date: string;          
+  type: 'income' | 'expense';
   source: 'e-wallet' | 'mobile-banking' | 'cash' | 'debit-card' | 'credit-card' | 'transfer';
-  type: 'expense' | 'income';
-  is_anomaly: boolean;
-  anomaly_score: number;
-  receipt_url: string | null;
-  transaction_date: string;
-  created_at: string;
-  category?: Category;
+  is_ocr: boolean;       
+  image_url?: string;    
+  is_anomaly?: boolean;
+  created_at?: string;
 }
 
 export interface AnomalyAlert {

@@ -48,6 +48,7 @@
     }
   }
 }
+
 /* ==========================================
    SISTEM TEMA KARAKTER KHUSUS
    ========================================== */
@@ -61,14 +62,30 @@
 .theme-hellokitty {
   @apply bg-[#FFF0F5] text-[#8B4513];
 }
-.theme-hellokitty .bg-slate-950 { @apply bg-[#FFF0F5]; }
-.theme-hellokitty .bg-slate-900 { @apply bg-white border-[#FFB6C1] shadow-md shadow-pink-100 text-[#FF69B4]; }
-.theme-hellokitty .bg-slate-800 { @apply bg-[#FFE4E1]; }
-.theme-hellokitty .border-slate-800 { @apply border-[#FFC0CB]; }
-.theme-hellokitty .border-slate-700 { @apply border-[#FFB6C1]; }
-.theme-hellokitty .text-slate-400 { @apply text-[#FF69B4]; }
-.theme-hellokitty .text-white { color: #8B4513; }
-.theme-hellokitty .bg-gradient-to-r { @apply from-[#FF69B4] to-[#FFB6C1] text-[#ffffff]; }
+.theme-hellokitty .bg-slate-950 { @apply bg-[#FFF0F5] !important; }
+.theme-hellokitty .bg-slate-900 { @apply bg-white border-[#FFB6C1] shadow-md shadow-pink-100 text-[#d81b60] !important; }
+.theme-hellokitty .bg-slate-800 { @apply bg-[#FFE4E1] text-[#d81b60] !important; }
+
+/* Menyesuaikan border untuk pop-up/modal */
+.theme-hellokitty .border-slate-800 { @apply border-[#FFC0CB] !important; }
+.theme-hellokitty .border-slate-700 { @apply border-[#FFB6C1] !important; }
+
+.theme-hellokitty .text-slate-200,
+.theme-hellokitty .text-slate-300,
+.theme-hellokitty .text-slate-400,
+.theme-hellokitty .text-slate-500,
+.theme-hellokitty .text-slate-600,
+.theme-hellokitty .text-gray-400,
+.theme-hellokitty .text-gray-500 { 
+  @apply text-[#c2185b] font-medium !important; 
+}
+
+/* Teks yang tadinya putih (seperti judul Pop-up) dipaksa jadi Coklat Tua */
+.theme-hellokitty .text-white { color: #8B4513 !important; }
+
+/* Tombol / Background Gradient */
+.theme-hellokitty .bg-gradient-to-r { @apply from-[#FF69B4] to-[#FFB6C1] text-[#ffffff] !important; }
+
 
 /* 3. TEMA OCEAN (Gaya Sporty/eFootball - 100 Poin) */
 .theme-ocean {

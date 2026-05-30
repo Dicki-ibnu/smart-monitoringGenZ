@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
- "scripts": {
+  "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js"
   },
@@ -12,10 +12,16 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@supabase/supabase-js": "^2.106.1",
+    "@supabase/supabase-js": "^2.106.2",
+    "amqplib": "^2.0.1",
+    "axios": "^1.16.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "form-data": "^4.0.5",
+    "joi": "^18.2.1",
+    "multer": "^2.1.1",
+    "redis": "^5.12.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

@@ -17,7 +17,7 @@ export default function AnomalyPage() {
   const [filter, setFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
   const [scanning, setScanning] = useState(false);
   
-  // STATE BARU UNTUK POP-UP MODAL YANG CANTIK
+  // STATE UNTUK POP-UP MODAL YANG CANTIK
   const [scanResult, setScanResult] = useState<{type: 'success' | 'warning' | 'error', title: string, message: string} | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -51,14 +51,14 @@ export default function AnomalyPage() {
     setScanResult(null); // Tutup modal sebelumnya jika ada
 
     try {
-      // PERBAIKAN DI SINI:
-      // Hanya mengirim variabel 'transactions' sebagai array mentah. 
-      // File api.ts akan otomatis membungkusnya menjadi { transactions }.
+      // Mengirim variabel 'transactions' sebagai array mentah. 
       const res = await customBackendApi.anomalyDetect(transactions);
       const newAnomalies = res.data.anomalies;
 
       if (newAnomalies && newAnomalies.length > 0) {
-        for (const anomaly of newAnomalies) {
+        
+        // BATCH INSERT (Menyimpan semua anomali secara serentak/parallel)
+        const insertPromises = newAnomalies.map((anomaly: any) => {
           const alertData = {
             user_id: user.id,
             transaction_id: anomaly.transaction_id,
@@ -68,10 +68,14 @@ export default function AnomalyPage() {
             message: anomaly.message,
             is_resolved: false
           };
-          await anomalyAlertsApi.create(alertData);
-        }
+          return anomalyAlertsApi.create(alertData);
+        });
+
+        // Eksekusi semua proses simpan dalam 1 waktu
+        await Promise.all(insertPromises);
         
-        fetchData();
+        fetchData(); // Refresh list di layar
+        
         // POP-UP BAHAYA TAPI CANTIK
         setScanResult({ 
           type: 'warning', 
